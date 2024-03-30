@@ -123,7 +123,7 @@ public class MainActivity extends AppCompatActivity implements OnClickListener
                             foundItem = true; // Set flag when <item> tag is found
                             Log.d("MyTag", "New Thing found!");
                         } else if (foundItem) { // Process data only if <item> tag is found
-                            if (xpp.getName().equalsIgnoreCase("description")) {
+                            if (xpp.getName().equalsIgnoreCase("link")) {
                                 // Now just get the associated text
                                 String temp = xpp.nextText();
                                 tempStrings.add(temp);
@@ -132,7 +132,9 @@ public class MainActivity extends AppCompatActivity implements OnClickListener
                             } else if (xpp.getName().equalsIgnoreCase("title")) {
                                 // Now just get the associated text
                                 String temp = xpp.nextText();
-                                tempStrings.add(temp);
+                                String rainStatus = temp.substring(temp.indexOf(":") + 2, temp.indexOf(",")).trim();
+                                tempStrings.add(rainStatus);
+
                                 // Do something with text
                                 Log.d("MyTag", "Nut is " + temp);
                             } else if (xpp.getName().equalsIgnoreCase("link")) {
