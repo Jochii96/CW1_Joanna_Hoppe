@@ -1,188 +1,180 @@
 package com.example.cw1;
 
-/*  Starter project for Mobile Platform Development in main diet 2023/2024
-    You should use this project as the starting point for your assignment.
-    This project simply reads the data from the required URL and displays the
-    raw data in a TextField
-*/
-
-//
-// Name                 _________________
-// Student ID           _________________
-// Programme of Study   _________________
-//
-
-// UPDATE THE PACKAGE NAME to include your Student Identifier
-
 import androidx.appcompat.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
-import android.view.View.OnClickListener;
 import android.widget.Button;
 import android.widget.TextView;
 import org.xmlpull.v1.XmlPullParser;
-import org.xmlpull.v1.XmlPullParserException;
 import org.xmlpull.v1.XmlPullParserFactory;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.StringReader;
 import java.net.URL;
 import java.net.URLConnection;
-import java.io.StringReader;
 import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
-public class MainActivity extends AppCompatActivity implements OnClickListener
-{
+public class MainActivity extends AppCompatActivity implements View.OnClickListener {
     private TextView rawDataDisplay;
     private Button startButton;
-    private String result;
-    private String url1="";
-    private String urlSource="https://weather-broker-cdn.api.bbci.co.uk/en/forecast/rss/3day/2648579";
+    private Map<String, List<Weather>> weatherReportsByLocation = new HashMap<>();
+
+    private Map<String, String> locationIdToNameMap = new HashMap<>();
 
     @Override
-    protected void onCreate(Bundle savedInstanceState)
-    {
+    protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        // Set up the raw links to the graphical components
-        rawDataDisplay = (TextView)findViewById(R.id.rawDataDisplay);
-        startButton = (Button)findViewById(R.id.startButton);
+
+        locationIdToNameMap.put("2648579", "Glasgow");
+        locationIdToNameMap.put("2643743", "London");
+        locationIdToNameMap.put("5128581", "New York");
+        locationIdToNameMap.put("287286", "Oman");
+        locationIdToNameMap.put("934154", "Mauritius");
+        locationIdToNameMap.put("1185241", "Bangladesh");
+
+        rawDataDisplay = findViewById(R.id.rawDataDisplay);
+        startButton = findViewById(R.id.startButton);
         startButton.setOnClickListener(this);
-
-        // More Code goes here
     }
 
-    public void onClick(View aview)
-    {
-        startProgress();
+    @Override
+    public void onClick(View view) {
+        weatherReportsByLocation.clear(); // Clear the list for fresh data on each click
+        rawDataDisplay.setText(""); // Clear the display
+        String[] locationIds = {"2648579", "2643743", "5128581", "287286", "934154", "1185241"};
+        for (String id : locationIds) {
+            startProgress(id);
+        }
     }
 
-    public void startProgress()
-    {
-        // Run network access on a separate thread;
-        new Thread(new Task(urlSource)).start();
-    } //
+    public void startProgress(String locationId) {
+        String locationName = locationIdToNameMap.get(locationId); // Get the location name using the ID
 
-    // Need separate thread to access the internet resource over network
-    // Other neater solutions should be adopted in later iterations.
+        if (locationName == null) {
+            Log.e("startProgress", "Location name for ID " + locationId + " not found.");
+            return; // Optionally handle this case more gracefully
+        }
+        String url = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/rss/3day/" + locationId;
+        new Thread(new Task(url, locationId, locationName)).start(); // Pass both the URL and location ID
+    }
+
     private class Task implements Runnable {
         private String url;
+        private String locationId;
+        private String locationName;
 
-        public Task(String aurl) {
-            url = aurl;
+        public Task(String url, String locationId, String locationName) {
+            this.url = url;
+            this.locationId = locationId;
+            this.locationName = locationName;
+
         }
 
         @Override
         public void run() {
-            ArrayList<String> tempStrings = new ArrayList<>();
-            URL aurl;
-            URLConnection yc;
-            BufferedReader in = null;
-            String inputLine = "";
-
-
-            Log.e("MyTag", "in run");
-
+            StringBuilder result = new StringBuilder();
             try {
-                Log.e("MyTag", "in try");
-                aurl = new URL(url);
-                yc = aurl.openConnection();
-                in = new BufferedReader(new InputStreamReader(yc.getInputStream()));
+                URL aurl = new URL(url);
+                URLConnection yc = aurl.openConnection();
+                BufferedReader in = new BufferedReader(new InputStreamReader(yc.getInputStream()));
+                String inputLine;
                 while ((inputLine = in.readLine()) != null) {
-                    result = result + inputLine;
-                    Log.e("MyTag", inputLine);
-
+                    result.append(inputLine);
                 }
                 in.close();
-            } catch (IOException ae) {
-                Log.e("MyTag", "ioexception");
+            } catch (IOException e) {
+                Log.e("MyTag", "IOException", e);
             }
 
-            //Get rid of the first tag <?xml version="1.0" encoding="utf-8"?>
-            int i = result.indexOf(">");
-            result = result.substring(i + 1);
-            Log.e("MyTag - cleaned", result);
 
-            //
-            // Now that you have the xml data you can parse it
-            //
+            String locationName = locationIdToNameMap.get(locationId);
+            parseXML(result.toString());
+        }
 
+        private void parseXML(String xml) {
+            List<Weather> localList = new ArrayList<>();
             try {
                 XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
                 factory.setNamespaceAware(true);
                 XmlPullParser xpp = factory.newPullParser();
-                xpp.setInput(new StringReader(result));
+
+                xpp.setInput(new StringReader(xml));
                 int eventType = xpp.getEventType();
-                boolean foundItem = false; // Flag to track if <item> tag is found
+                Weather currentWeather = null;
+                boolean insideItem = false;
 
-                // Now start parsing
                 while (eventType != XmlPullParser.END_DOCUMENT) {
-                    if (eventType == XmlPullParser.START_TAG) {
-                        if (xpp.getName().equalsIgnoreCase("item")) {
-                            foundItem = true; // Set flag when <item> tag is found
-                            Log.d("MyTag", "New Thing found!");
-                        } else if (foundItem) { // Process data only if <item> tag is found
-                            if (xpp.getName().equalsIgnoreCase("link")) {
-                                // Now just get the associated text
-                                String temp = xpp.nextText();
-                                tempStrings.add(temp);
-                                // Do something with text
-                                Log.d("MyTag", "Bolt is " + temp);
-                            } else if (xpp.getName().equalsIgnoreCase("title")) {
-                                // Now just get the associated text
-                                String temp = xpp.nextText();
-                                String rainStatus = temp.substring(temp.indexOf(":") + 2, temp.indexOf(",")).trim();
-                                tempStrings.add(rainStatus);
-
-                                // Do something with text
-                                Log.d("MyTag", "Nut is " + temp);
-                            } else if (xpp.getName().equalsIgnoreCase("link")) {
-                                // Now just get the associated text
-                                String temp = xpp.nextText();
-                                tempStrings.add(temp);
-                                // Do something with text
-                                Log.d("MyTag", "Washer is " + temp);
-                            }
-                        }
-                    } else if (eventType == XmlPullParser.END_TAG) {
-                        if (xpp.getName().equalsIgnoreCase("item")) {
-                            Log.d("MyTag", "Thing parsing completed!");
-                            foundItem = false; // Reset flag when </item> tag is encountered
-                        }
+                    if (eventType == XmlPullParser.START_TAG && "item".equalsIgnoreCase(xpp.getName())) {
+                        insideItem = true;
+                        currentWeather = new Weather(locationId, locationName);
+                    } else if (insideItem && "title".equalsIgnoreCase(xpp.getName())) {
+                        String titleText = xpp.nextText();
+                        String condition = titleText.split(",")[0].split(":")[1].trim();
+                        currentWeather.setCondition(condition);
                     }
-                    eventType = xpp.next(); // Get the next event before looping again
+                    if (eventType == XmlPullParser.END_TAG && "item".equalsIgnoreCase(xpp.getName()) && currentWeather != null) {
+                        localList.add(currentWeather);
+                        currentWeather = null;
+                        insideItem = false;
+                    }
+                    eventType = xpp.next();
                 }
-            } catch (XmlPullParserException ae1) {
-                Log.e("MyTag", "Parsing error" + ae1.toString());
-            } catch (IOException ae1) {
-                Log.e("MyTag", "IO error during parsing");
+            } catch (Exception e) {
+                Log.e("MyTag", "Parsing error", e);
             }
 
             Log.d("MyTag", "End of document reached");
 
+            synchronized (this) {
+                weatherReportsByLocation.putIfAbsent(locationName, new ArrayList<>());
+                weatherReportsByLocation.get(locationName).addAll(localList);
+            }
 
-
-
-
-            // Now update the TextView to display raw XML data
-            // Probably not the best way to update TextView
-            // but we are just getting started !
-
-            MainActivity.this.runOnUiThread(new Runnable() {
-                public void run() {
-                    Log.d("UI thread", "I am the UI thread");
-                    StringBuilder stringBuilder = new StringBuilder();
-                    for (String item : tempStrings) {
-                        stringBuilder.append(item).append("\n"); // Add each item to the StringBuilder
-                    }
-                    String textToShow = stringBuilder.toString();
-
-                    rawDataDisplay.setText(textToShow); // Set the text to rawDataDisplay
-                }
-
-
-            });
+            MainActivity.this.runOnUiThread(() -> updateUI());
         }
-    }}
+    }
 
+    private void updateUI() {
+        StringBuilder displayText = new StringBuilder();
+        for (Map.Entry<String, List<Weather>> entry : weatherReportsByLocation.entrySet()) {
+            String locationName = entry.getKey();
+            List<Weather> reports = entry.getValue();
+            displayText.append(locationName).append(":\n");
+            for (Weather report : reports) {
+                displayText.append(report.getCondition()).append("\n");
+            }
+            displayText.append("\n"); // Extra newline for spacing between locations
+        }
+        rawDataDisplay.setText(displayText.toString());
+    }
+
+    public static class Weather {
+        private String condition;
+        private String locationId;
+        private String locationName;
+
+        public void setCondition(String condition) {
+            this.condition = condition;
+        }
+        public Weather(String locationId, String locationName) {
+            this.locationId = locationId;
+            this.locationName = locationName;
+        }
+
+
+        public String getCondition() {
+            return condition;
+        }
+        public String getLocationName() {
+            return locationName;
+        }
+    }
+}
