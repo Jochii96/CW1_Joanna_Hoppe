@@ -1,6 +1,8 @@
 package com.example.cw1;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.viewpager2.widget.ViewPager2;
+
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
@@ -21,11 +23,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class MainActivity extends AppCompatActivity implements View.OnClickListener {
-    private TextView rawDataDisplay;
-    private Button startButton;
-    private Map<String, List<Weather>> weatherReportsByLocation = new HashMap<>();
+public class MainActivity extends AppCompatActivity {
+    private ViewPager2 viewPager;
 
+    private Map<String, String> weatherDataAsString = new HashMap<>();
     private Map<String, String> locationIdToNameMap = new HashMap<>();
 
     @Override
@@ -33,49 +34,38 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        populateLocationIdToNameMap();
+        viewPager = findViewById(R.id.viewPager);
+        fetchWeatherForAllLocations();
+    }
+
+    private void populateLocationIdToNameMap() {
         locationIdToNameMap.put("2648579", "Glasgow");
         locationIdToNameMap.put("2643743", "London");
         locationIdToNameMap.put("5128581", "New York");
         locationIdToNameMap.put("287286", "Oman");
         locationIdToNameMap.put("934154", "Mauritius");
         locationIdToNameMap.put("1185241", "Bangladesh");
-
-        rawDataDisplay = findViewById(R.id.rawDataDisplay);
-        startButton = findViewById(R.id.startButton);
-        startButton.setOnClickListener(this);
     }
 
-    @Override
-    public void onClick(View view) {
-        weatherReportsByLocation.clear(); // Clear the list for fresh data on each click
-        rawDataDisplay.setText(""); // Clear the display
-        String[] locationIds = {"2648579", "2643743", "5128581", "287286", "934154", "1185241"};
-        for (String id : locationIds) {
-            startProgress(id);
+    private void fetchWeatherForAllLocations() {
+        for (String locationId : locationIdToNameMap.keySet()) {
+            startProgress(locationId);
         }
     }
 
-    public void startProgress(String locationId) {
-        String locationName = locationIdToNameMap.get(locationId); // Get the location name using the ID
-
-        if (locationName == null) {
-            Log.e("startProgress", "Location name for ID " + locationId + " not found.");
-            return; // Optionally handle this case more gracefully
-        }
+    private void startProgress(String locationId) {
         String url = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/rss/3day/" + locationId;
-        new Thread(new Task(url, locationId, locationName)).start(); // Pass both the URL and location ID
+        new Thread(new Task(url, locationId)).start();
     }
 
     private class Task implements Runnable {
-        private String url;
-        private String locationId;
-        private String locationName;
+        private final String url;
+        private final String locationId;
 
-        public Task(String url, String locationId, String locationName) {
+        Task(String url, String locationId) {
             this.url = url;
             this.locationId = locationId;
-            this.locationName = locationName;
-
         }
 
         @Override
@@ -91,16 +81,13 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 }
                 in.close();
             } catch (IOException e) {
-                Log.e("MyTag", "IOException", e);
+                Log.e("MyTag", "IOException in reading XML", e);
             }
-
-
-            String locationName = locationIdToNameMap.get(locationId);
-            parseXML(result.toString());
+            parseXML(result.toString(), locationId);
         }
 
-        private void parseXML(String xml) {
-            List<Weather> localList = new ArrayList<>();
+        private void parseXML(String xml, String locationId) {
+            StringBuilder weatherDetailsBuilder = new StringBuilder();
             try {
                 XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
                 factory.setNamespaceAware(true);
@@ -108,21 +95,23 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
                 xpp.setInput(new StringReader(xml));
                 int eventType = xpp.getEventType();
-                Weather currentWeather = null;
                 boolean insideItem = false;
 
                 while (eventType != XmlPullParser.END_DOCUMENT) {
-                    if (eventType == XmlPullParser.START_TAG && "item".equalsIgnoreCase(xpp.getName())) {
-                        insideItem = true;
-                        currentWeather = new Weather(locationId, locationName);
-                    } else if (insideItem && "title".equalsIgnoreCase(xpp.getName())) {
-                        String titleText = xpp.nextText();
-                        String condition = titleText.split(",")[0].split(":")[1].trim();
-                        currentWeather.setCondition(condition);
-                    }
-                    if (eventType == XmlPullParser.END_TAG && "item".equalsIgnoreCase(xpp.getName()) && currentWeather != null) {
-                        localList.add(currentWeather);
-                        currentWeather = null;
+                    if (eventType == XmlPullParser.START_TAG) {
+                        if ("item".equals(xpp.getName())) {
+                            insideItem = true;
+                        } else if (insideItem && "title".equals(xpp.getName())) {
+                            // Assuming the title tag contains weather condition
+                            String titleText = xpp.nextText();
+                            // Extract and format the weather condition from the title
+                            {
+                                String condition = titleText.split(",")[0].split(":")[1].trim();
+                                weatherDetailsBuilder.append("Condition: ").append(condition).append("\n");
+                            }
+                        }
+                        // Extend with additional parsing rules as needed
+                    } else if (eventType == XmlPullParser.END_TAG && "item".equals(xpp.getName())) {
                         insideItem = false;
                     }
                     eventType = xpp.next();
@@ -131,30 +120,29 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
                 Log.e("MyTag", "Parsing error", e);
             }
 
-            Log.d("MyTag", "End of document reached");
+            final String weatherDetails = weatherDetailsBuilder.toString();
+            runOnUiThread(() -> updateWeatherData(locationId, weatherDetails));
+        }
 
-            synchronized (this) {
-                weatherReportsByLocation.putIfAbsent(locationName, new ArrayList<>());
-                weatherReportsByLocation.get(locationName).addAll(localList);
-            }
+    }
 
-            MainActivity.this.runOnUiThread(() -> updateUI());
+    private void updateWeatherData(String locationId, String weatherDetails) {
+        String locationName = locationIdToNameMap.get(locationId);
+        if (locationName != null) {
+            weatherDataAsString.put(locationName, weatherDetails);
+        }
+
+        // Check if all weather data is fetched and parsed
+        if (weatherDataAsString.size() == locationIdToNameMap.size()) {
+            // Ensure this operation runs on the UI thread
+            runOnUiThread(() -> {
+                List<String> locationNames = new ArrayList<>(locationIdToNameMap.values());
+                Location_adapter adapter = new Location_adapter(this, locationNames, weatherDataAsString);
+                viewPager.setAdapter(adapter);
+            });
         }
     }
 
-    private void updateUI() {
-        StringBuilder displayText = new StringBuilder();
-        for (Map.Entry<String, List<Weather>> entry : weatherReportsByLocation.entrySet()) {
-            String locationName = entry.getKey();
-            List<Weather> reports = entry.getValue();
-            displayText.append(locationName).append(":\n");
-            for (Weather report : reports) {
-                displayText.append(report.getCondition()).append("\n");
-            }
-            displayText.append("\n"); // Extra newline for spacing between locations
-        }
-        rawDataDisplay.setText(displayText.toString());
-    }
 
     public static class Weather {
         private String condition;
