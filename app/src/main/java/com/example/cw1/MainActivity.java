@@ -26,8 +26,9 @@ import java.util.Map;
 public class MainActivity extends AppCompatActivity {
     private ViewPager2 viewPager;
 
-    private Map<String, String> weatherDataAsString = new HashMap<>();
+
     private Map<String, String> locationIdToNameMap = new HashMap<>();
+    private Map<String, Weather> weatherData = new HashMap<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,7 +56,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startProgress(String locationId) {
-        String url = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/rss/3day/" + locationId;
+        String url = "https://weather-broker-cdn.api.bbci.co.uk/en/observation/rss/" + locationId;
         new Thread(new Task(url, locationId)).start();
     }
 
@@ -87,7 +88,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         private void parseXML(String xml, String locationId) {
-            StringBuilder weatherDetailsBuilder = new StringBuilder();
+            final Weather weather = new Weather();
             try {
                 XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
                 factory.setNamespaceAware(true);
@@ -102,13 +103,25 @@ public class MainActivity extends AppCompatActivity {
                         if ("item".equals(xpp.getName())) {
                             insideItem = true;
                         } else if (insideItem && "title".equals(xpp.getName())) {
-                            // Assuming the title tag contains weather condition
+                            // Extracting weather condition from the title
                             String titleText = xpp.nextText();
-                            // Extract and format the weather condition from the title
-                            {
-                                String condition = titleText.split(",")[0].split(":")[1].trim();
-                                weatherDetailsBuilder.append("Condition: ").append(condition).append("\n");
-                            }
+                            String condition = titleText.split(" - ")[0].trim();
+                            weather.setCondition(condition);
+
+                            String[] parts = titleText.split(" - ")[1].split(":", 3);
+                            String time = parts[0] + ":" + parts[1].trim().split(" ")[0];
+                            weather.setTime(time);
+
+                            String[] temperaturePart = titleText.split("Â°C")[0].split(",");  // Isolate the part ending with the temperature
+                            String temperature = temperaturePart[temperaturePart.length - 1].split(" ")[1].trim(); // Extract "16"
+                            weather.setTemperature(temperature);
+
+                        } else if (insideItem && "pubDate".equals(xpp.getName())) {
+                            String pubDateFullText = xpp.nextText();
+                            // Extracting publication date from the pubDate tag
+                            String[] dateParts = pubDateFullText.split(" ");
+                            String date = dateParts[1] + " " + dateParts[2] + " " + dateParts[3];
+                            weather.setDate(date);
                         }
                         // Extend with additional parsing rules as needed
                     } else if (eventType == XmlPullParser.END_TAG && "item".equals(xpp.getName())) {
@@ -120,49 +133,36 @@ public class MainActivity extends AppCompatActivity {
                 Log.e("MyTag", "Parsing error", e);
             }
 
-            final String weatherDetails = weatherDetailsBuilder.toString();
-            runOnUiThread(() -> updateWeatherData(locationId, weatherDetails));
-        }
-
-    }
-
-    private void updateWeatherData(String locationId, String weatherDetails) {
-        String locationName = locationIdToNameMap.get(locationId);
-        if (locationName != null) {
-            weatherDataAsString.put(locationName, weatherDetails);
-        }
-
-        // Check if all weather data is fetched and parsed
-        if (weatherDataAsString.size() == locationIdToNameMap.size()) {
-            // Ensure this operation runs on the UI thread
-            runOnUiThread(() -> {
-                List<String> locationNames = new ArrayList<>(locationIdToNameMap.values());
-                Location_adapter adapter = new Location_adapter(this, locationNames, weatherDataAsString);
-                viewPager.setAdapter(adapter);
+            final String locationName = locationIdToNameMap.get(locationId);
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    updateWeatherData(locationName, weather);
+                }
             });
         }
+
+        private void updateWeatherData(String locationName, Weather weather) {
+            if (locationName != null && weather != null) {
+                weatherData.put(locationName, weather);
+            }
+
+            if (weatherData.size() == locationIdToNameMap.size()) {
+                updateViewPager();
+            }
+        }
+
+
+
+        // Check if all weather data is fetched and parsed
+
+    }
+    private void updateViewPager() {
+        List<String> locationNames = new ArrayList<>(locationIdToNameMap.values());
+        LocationAdapter adapter = new LocationAdapter(this, locationNames, weatherData);
+        viewPager.setAdapter(adapter);
     }
 
 
-    public static class Weather {
-        private String condition;
-        private String locationId;
-        private String locationName;
 
-        public void setCondition(String condition) {
-            this.condition = condition;
-        }
-        public Weather(String locationId, String locationName) {
-            this.locationId = locationId;
-            this.locationName = locationName;
-        }
-
-
-        public String getCondition() {
-            return condition;
-        }
-        public String getLocationName() {
-            return locationName;
-        }
     }
-}
