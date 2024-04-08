@@ -2,7 +2,7 @@ package com.example.cw1;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.viewpager2.widget.ViewPager2;
-
+import java.util.concurrent.ConcurrentHashMap;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
@@ -25,10 +25,13 @@ import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
     private ViewPager2 viewPager;
+    private ViewPager2 viewPager2;
 
 
     private Map<String, String> locationIdToNameMap = new HashMap<>();
-    private Map<String, Weather> weatherData = new HashMap<>();
+
+    private Map<String, ThreeDayForecast> forecastData = new HashMap<>();
+    private Map<String, Weather> weatherData = new ConcurrentHashMap<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -37,7 +40,12 @@ public class MainActivity extends AppCompatActivity {
 
         populateLocationIdToNameMap();
         viewPager = findViewById(R.id.viewPager);
+        viewPager2 = findViewById(R.id.viewPager2);
         fetchWeatherForAllLocations();
+        startAdditionalDataFetching();
+
+
+
     }
 
     private void populateLocationIdToNameMap() {
@@ -157,12 +165,130 @@ public class MainActivity extends AppCompatActivity {
         // Check if all weather data is fetched and parsed
 
     }
-    private void updateViewPager() {
-        List<String> locationNames = new ArrayList<>(locationIdToNameMap.values());
-        LocationAdapter adapter = new LocationAdapter(this, locationNames, weatherData);
-        viewPager.setAdapter(adapter);
+
+
+
+        // Existing fields and methods...
+
+        // New method to start fetching additional data
+        private void startAdditionalDataFetching() {
+            for (String locationId : locationIdToNameMap.keySet()) {
+                String newUrl = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/rss/3day/" + locationId;
+                new Thread(new AdditionalDataTask(newUrl, locationId)).start();
+            }
+        }
+
+        // AdditionalDataTask class
+        private class AdditionalDataTask implements Runnable {
+            private final String url;
+            private final String locationId;
+
+
+
+            AdditionalDataTask(String url, String locationId) {
+                this.url = url;
+                this.locationId = locationId;
+            }
+
+            @Override
+            public void run() {
+                StringBuilder result = new StringBuilder();
+                try {
+                    URL aurl = new URL(url);
+                    URLConnection yc = aurl.openConnection();
+                    BufferedReader in = new BufferedReader(new InputStreamReader(yc.getInputStream()));
+                    String inputLine;
+                    while ((inputLine = in.readLine()) != null) {
+                        result.append(inputLine);
+                    }
+                    in.close();
+                } catch (IOException e) {
+                    Log.e("MyTag", "IOException in reading XML", e);
+                }
+                // Assuming you directly use the fetched data
+                parseThreeDayForecastXML(result.toString(), locationId);
+            }
+
+            private void parseThreeDayForecastXML(String xml, String locationId) {
+                final ThreeDayForecast forecast = new ThreeDayForecast();
+
+                try {
+                    XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
+                    factory.setNamespaceAware(true);
+                    XmlPullParser xpp = factory.newPullParser();
+
+                    xpp.setInput(new StringReader(xml));
+                    int eventType = xpp.getEventType();
+                    boolean insideItem = false;
+                    int dayCounter = 0; // To keep track of the forecast day.
+
+                    Log.d("MyTag", "Starting XML Parsing"); // Add this line
+
+                    while (eventType != XmlPullParser.END_DOCUMENT) {
+                        if (eventType == XmlPullParser.START_TAG) {
+                            if ("item".equals(xpp.getName())) {
+                                insideItem = true;
+                                dayCounter++; // Increment day counter when a new <item> is found.
+                                Log.d("MyTag", "Found an item. Day counter: " + dayCounter); // Add this line
+                            } else if (insideItem && "title".equals(xpp.getName())) {
+                                String titleText = xpp.nextText();
+
+                                Log.d("MyTag", "Title text for day " + dayCounter + ": " + titleText); // Add this line
+
+                                // Directly assign the fetched title to the corresponding day's condition
+                                switch (dayCounter) {
+                                    case 1:
+                                        forecast.setConditionDay1(titleText);
+                                        break;
+                                    case 2:
+                                        forecast.setConditionDay2(titleText);
+                                        break;
+                                    case 3:
+                                        forecast.setConditionDay3(titleText);
+                                        break;
+                                }
+                            }
+                        } else if (eventType == XmlPullParser.END_TAG && "item".equals(xpp.getName())) {
+                            insideItem = false;
+                            Log.d("MyTag", "Ending an item."); // Add this line
+                        }
+                        eventType = xpp.next();
+                    }
+                    Log.d("MyTag", "Finished XML Parsing"); // Add this line
+
+
+
+                } catch (Exception e) {
+                    Log.e("MyTag", "Parsing error", e);
+                }
+
+                final String locationName = locationIdToNameMap.get(locationId);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        updateForecastData(locationName, forecast);
+                    }
+                });
+            }
+
+            private void updateForecastData(String locationName, ThreeDayForecast forecast) {
+                if (locationName != null && forecast != null) {
+                    forecastData.put(locationName, forecast);
+                }
+
+                if (forecastData.size() == locationIdToNameMap.size()) {
+                    updateViewPager();
+                }
+            }}
+            // Method to handle new data (to be implemented)
+        private void updateViewPager() {
+            List<String> locationNames = new ArrayList<>(locationIdToNameMap.values());
+            LocationAdapter adapter = new LocationAdapter(this, locationNames, weatherData, forecastData);
+            viewPager.setAdapter(adapter);
+        }
+
     }
 
 
 
-    }
+
